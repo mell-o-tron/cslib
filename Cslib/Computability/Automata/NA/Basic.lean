@@ -82,6 +82,20 @@ instance : ωAcceptor (Buchi State Symbol) Symbol where
 
 end Buchi
 
+/-- Nondeterministic Generalized Büchi automaton. -/
+structure GBuchi (State Symbol : Type*) extends NA State Symbol where
+  /-- The set of accepting sets; -/
+  accept : Finset (Set State)
+
+namespace GBuchi
+
+@[simp, scoped grind =]
+instance : ωAcceptor (GBuchi State Symbol) Symbol where
+  Accepts (a : GBuchi State Symbol) (xs : ωSequence Symbol) :=
+    ∃ ss, a.Run xs ss ∧ ∀ F ∈ a.accept, ∃ᶠ k in atTop, ss k ∈ F
+
+end GBuchi
+
 /-- Nondeterministic Muller automaton. -/
 structure Muller (State Symbol : Type*) extends NA State Symbol where
   /-- The set of sets of accepting states. -/
