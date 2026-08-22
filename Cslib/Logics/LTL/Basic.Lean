@@ -8,6 +8,7 @@ module
 
 public import Cslib.Foundations.Semantics.LTS.Bisimulation
 public import Cslib.Foundations.Data.OmegaSequence.Defs
+public import Cslib.Foundations.Data.OmegaSequence.Temporal
 
 @[expose] public section
 
@@ -45,10 +46,9 @@ inductive Proposition (T : Type u) : Type u where
   | implies (φ₁ φ₂ : Proposition T)
   | iff (φ₁ φ₂ : Proposition T)
   | next (φ : Proposition T)
-  | eventually (φ : Proposition T)
-  | always (φ : Proposition T)
   | until_op (φ : Proposition T) (φ : Proposition T)
   | atom (p : T)
+
 
 /-- Satisfaction relation for ω-sequences of atom valuations. -/
 @[simp, scoped grind =]
@@ -62,14 +62,28 @@ def Satisfies (ls : ωSequence (Set T)) : Proposition T → Prop
   | .atom (p) => p ∈ ls 0
   | .not φ => ¬ (Satisfies ls φ)
   | .next φ => Satisfies (ls.drop 1) φ
-  | .eventually φ => ∃ k : ℕ, Satisfies (ωSequence.drop k ls) φ
-  | .always φ => ∀ k : ℕ , Satisfies (ωSequence.drop k ls) φ
   | .until_op φ₁ φ₂ => ∃ k : ℕ,
       Satisfies (ωSequence.drop k ls) φ₂ ∧
       ∀ i : ℕ, i < k →
         Satisfies (ωSequence.drop i ls) φ₁
 
+def Proposition.eventually (φ : Proposition T) : Proposition T :=
+  Proposition.until_op Proposition.true φ
+
+def Proposition.always (φ : Proposition T) : Proposition T :=
+  Proposition.not (Proposition.eventually (.not φ))
+
 notation:50 ls " ⊧ " φ => Satisfies ls φ
+
+@[simp, scoped grind =]
+theorem eventually_def {ls : ωSequence (Set T)} {φ : Proposition T} :
+    (ls ⊧ φ.eventually) ↔ ∃ k : ℕ, ls.drop k ⊧ φ := by
+  simp [Proposition.eventually]
+
+@[simp, scoped grind =]
+theorem always_def {ls : ωSequence (Set T)} {φ : Proposition T} :
+    (ls ⊧ φ.always) ↔ ∀ k : ℕ, ls.drop k ⊧ φ := by
+  simp [Proposition.always]
 
 /-- Validity of LTL propositions on ω-sequences. -/
 @[simp, scoped grind =]
@@ -91,78 +105,101 @@ Proposition.eventually (φ.or ψ) ≈ (Proposition.or (φ.eventually) (ψ.eventu
   simp
   grind
 
+theorem distrib_eventually_and : ∀ (φ : Proposition T) (ψ : Proposition T) (xs : ωSequence (Set T)),
+  (xs ⊧ (φ.and ψ).eventually) → (xs ⊧ (φ.eventually).and (ψ.eventually)) := by
+  simp
+  grind
+
 /-- Expansion rule for the `until` operator. -/
 @[scoped grind .]
 theorem expansion_until {T} : ∀ (φ : Proposition T) (ψ : Proposition T) ,
 φ.until_op ψ ≈ ψ.or (φ.and ((φ.until_op ψ).next)) := by
-intros
-unfold Proposition.Valid
-intro
-apply Iff.intro
-· intro h
-  unfold Satisfies
-  simp only [Satisfies, ωSequence.drop_drop]
-  rcases h with ⟨x, hx⟩
-  cases x
-  · simp only [ωSequence.drop_zero, not_lt_zero, IsEmpty.forall_iff, implies_true, and_true] at hx
-    left
-    exact hx
-  · right
+  intros
+  unfold Proposition.Valid
+  intro
+  apply Iff.intro
+  · intro h
+    unfold Satisfies
+    simp only [Satisfies, ωSequence.drop_drop]
+    rcases h with ⟨x, hx⟩
+    cases x
+    · simp only [ωSequence.drop_zero, not_lt_zero, IsEmpty.forall_iff, implies_true, and_true] at hx
+      left
+      exact hx
+    · right
+      constructor
+      · have hxr := hx.right
+        specialize hxr 0
+        simp only [lt_add_iff_pos_left, Nat.lt_add_one_iff,
+        zero_le, ωSequence.drop_zero, forall_const] at hxr
+        exact hxr
+      · grind
+  · intro h
+    rcases h with hL | hR
+    · exists 0
+      simp only [ωSequence.drop_zero, not_lt_zero, IsEmpty.forall_iff, implies_true, and_true]
+      exact hL
+    have hRr := hR.right
+    rcases hRr with ⟨x, hx⟩
+    exists (1 + x)
     constructor
-    · have hxr := hx.right
-      specialize hxr 0
-      simp only [lt_add_iff_pos_left, Order.lt_add_one_iff,
-      zero_le, ωSequence.drop_zero, forall_const] at hxr
-      exact hxr
-    · grind
-· intro h
-  rcases h with hL | hR
-  · exists 0
-    simp only [ωSequence.drop_zero, not_lt_zero, IsEmpty.forall_iff, implies_true, and_true]
-    exact hL
-  have hRr := hR.right
-  rcases hRr with ⟨x, hx⟩
-  exists (1 + x)
-  constructor
-  · have hxl := hx.left
-    simp only [ωSequence.drop_drop] at hxl
-    exact hxl
-  · intro i hi
-    rcases i with rfl | j
-    · have hRl := hR.left
-      exact hRl
-    · have hxr := hx.right
-      specialize hxr j
-      have hi' : Nat.succ j < Nat.succ x := by
-        simpa [Nat.succ_eq_add_one, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hi
-      have hj : j < x := Nat.lt_of_succ_lt_succ hi'
-      rw [Nat.add_comm j 1]
-      simp only [ωSequence.drop_drop] at hxr
-      exact (hxr hj)
+    · have hxl := hx.left
+      simp only [ωSequence.drop_drop] at hxl
+      exact hxl
+    · intro i hi
+      rcases i with rfl | j
+      · have hRl := hR.left
+        exact hRl
+      · have hxr := hx.right
+        specialize hxr j
+        have hi' : Nat.succ j < Nat.succ x := by
+          simpa [Nat.succ_eq_add_one, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hi
+        have hj : j < x := Nat.lt_of_succ_lt_succ hi'
+        rw [Nat.add_comm j 1]
+        simp only [ωSequence.drop_drop] at hxr
+        exact (hxr hj)
 
+theorem eventually_is_prefix_indipendent : ∀ (ψ : Proposition T) , ∀ (w : List (Set T)),
+  ∀ (xs : ωSequence (Set T)),
+  (xs ⊧ ψ.eventually) → (w ++ω xs) ⊧ ψ.eventually := by
+  intros k c t v
+  simp only [eventually_def]
+  obtain ⟨w, h⟩ := v
+  use w + c.length
+  rw [ωSequence.drop_append_of_ge_length]
+  · simp only [add_tsub_cancel_right]
+    exact h.left
+  simp
 
 /-- Expansion rule for the `eventually` operator. -/
 @[scoped grind .]
 theorem expansion_eventually {T} : ∀ (ψ : Proposition T) ,
 Proposition.eventually ψ ≈ ψ.or (ψ.eventually.next) := by
-simp only [Proposition.Valid, Satisfies, ωSequence.drop_drop]
-intros
-apply Iff.intro
-· intro h
-  rcases h with ⟨x, hx⟩
-  cases x
-  · simp only [ωSequence.drop_zero] at hx
-    left
-    exact hx
-  · right
-    rename_i j
-    rw [← Nat.add_comm] at hx
-    exists j
-· intro h
-  rcases h with hL | hR
-  · exists 0
-  · rcases hR with ⟨x, hx⟩
-    exists 1 + x
+  simp only [Proposition.Valid, Satisfies]
+  intros ψ ls
+  apply Iff.intro
+  · intro h
+    rcases h with ⟨x, hx⟩
+    cases x
+    · simp only [ωSequence.drop_zero] at hx
+      left
+      exact hx.left
+    · right
+      rename_i n
+      simp only [eventually_def, ωSequence.drop_drop]
+      use n
+      rw [← Nat.add_comm]
+      exact hx.left
+  · intro h
+    rcases h with hL | hR
+    · exists 0
+      rw [ωSequence.drop_zero]
+      simp only [not_lt_zero, Satisfies, implies_true, and_true]
+      exact hL
+    · have h1 := eventually_is_prefix_indipendent ψ (ls.take 1) (ωSequence.drop 1 ls) hR
+      rw [← ωSequence.append_take_drop 1 ls]
+      exact h1
+
 
 
 end Cslib.Logic.LTL
